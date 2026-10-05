@@ -1,0 +1,87 @@
+# DCompany - Módulo de conversão de imagens para tons de cinza (RabbitMQ + Go)
+x-build: &build
+  context: .
+
+x-rabbit-env: &rabbit-env
+  RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"   # painel: http://localhost:15672 (guest/guest)
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # ---------- Servidores de armazenamento (C3, C4) ----------
+  storage1:
+    build: { <<: *build, args: { SERVICE: storage } }
+    environment:
+      <<: *rabbit-env
+      STORAGE_ID: "1"
+      OUTPUT_DIR: /data/output
+    volumes:
+      - ./data/servers/1:/data/output
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+
+  storage2:
+    build: { <<: *build, args: { SERVICE: storage } }
+    environment:
+      <<: *rabbit-env
+      STORAGE_ID: "2"
+      OUTPUT_DIR: /data/output
+    volumes:
+      - ./data/servers/2:/data/output
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+
+  # ---------- Servidores de conversão (C1, C2) ----------
+  converter1:
+    build: { <<: *build, args: { SERVICE: converter } }
+    environment:
+      <<: *rabbit-env
+      CONVERTER_ID: "1"
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+
+  converter2:
+    build: { <<: *build, args: { SERVICE: converter } }
+    environment:
+      <<: *rabbit-env
+      CONVERTER_ID: "2"
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+
+  # ---------- Clientes / produtores (P) ----------
+  client1:
+    build: { <<: *build, args: { SERVICE: client } }
+    environment:
+      <<: *rabbit-env
+      CLIENT_ID: "1"
+      IMAGES_DIR: /data/input
+    volumes:
+      - ./data/clients/1:/data/input:ro
+    depends_on:
+      - converter1
+      - converter2
+      - storage1
+      - storage2
+
+  client2:
+    build: { <<: *build, args: { SERVICE: client } }
+    environment:
+      <<: *rabbit-env
+      CLIENT_ID: "2"
+      IMAGES_DIR: /data/input
+    volumes:
+      - ./data/clients/2:/data/input:ro
+    depends_on:
+      - converter1
+      - converter2
+      - storage1
+      - storage2
